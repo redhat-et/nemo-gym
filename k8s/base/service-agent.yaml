@@ -1,0 +1,16 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: gym-agent-svc
+  namespace: gym
+  labels:
+    app.kubernetes.io/name: gym-agent
+    app.kubernetes.io/part-of: nemo-gym
+spec:
+  selector:
+    app.kubernetes.io/name: gym-agent
+  ports:
+    - port: 8080
+      targetPort: http
+      protocol: TCP
+      name: http
