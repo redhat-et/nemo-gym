@@ -237,3 +237,6 @@ env.yaml
 
 # Backup files
 *.backup
+
+# K8s secrets (contain credentials)
+k8s/overlays/**/secret.yaml
