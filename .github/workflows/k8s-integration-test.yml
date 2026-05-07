@@ -1,5 +1,8 @@
 name: K8s Integration Test (kind)
 
+permissions:
+  contents: read
+
 on:
   push:
     branches: [main]
