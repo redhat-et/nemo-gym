@@ -72,22 +72,22 @@ helm install kuberay-operator kuberay/kuberay-operator \
 
 ## Quick Start
 
-### 1. Build and push images (or use GHCR)
+### 1. Build and push images (or use Quay.io)
 
-Pre-built images are available from GitHub Container Registry:
+Pre-built images are available from Quay.io:
 
-```
-ghcr.io/nvidia-nemo/gym/nemo-gym-resources:latest
-ghcr.io/nvidia-nemo/gym/nemo-gym-agent:latest
-ghcr.io/nvidia-nemo/gym/nemo-gym-model:latest
+```text
+quay.io/redhat-et/nemo-gym-resources:latest
+quay.io/redhat-et/nemo-gym-agent:latest
+quay.io/redhat-et/nemo-gym-model:latest
 ```
 
 Or build from source:
 
 ```bash
-docker build -f k8s/Dockerfile --target resources -t ghcr.io/nvidia-nemo/gym/nemo-gym-resources:latest .
-docker build -f k8s/Dockerfile --target agent -t ghcr.io/nvidia-nemo/gym/nemo-gym-agent:latest .
-docker build -f k8s/Dockerfile --target model -t ghcr.io/nvidia-nemo/gym/nemo-gym-model:latest .
+docker build -f k8s/Dockerfile --target resources -t quay.io/redhat-et/nemo-gym-resources:latest .
+docker build -f k8s/Dockerfile --target agent -t quay.io/redhat-et/nemo-gym-agent:latest .
+docker build -f k8s/Dockerfile --target model -t quay.io/redhat-et/nemo-gym-model:latest .
 ```
 
 ### 2. Configure LLM credentials
@@ -161,17 +161,17 @@ kustomize build k8s/overlays/code-gen-openshift | kubectl apply -f -
 
 ## Using a Different Image Registry
 
-Override the default GHCR images in any overlay's `kustomization.yaml`:
+Override the default images in any overlay's `kustomization.yaml`:
 
 ```yaml
 images:
-  - name: ghcr.io/nvidia-nemo/gym/nemo-gym-resources
+  - name: quay.io/redhat-et/nemo-gym-resources
     newName: quay.io/myorg/nemo-gym-resources
     newTag: v1.0.0
-  - name: ghcr.io/nvidia-nemo/gym/nemo-gym-agent
+  - name: quay.io/redhat-et/nemo-gym-agent
     newName: quay.io/myorg/nemo-gym-agent
     newTag: v1.0.0
-  - name: ghcr.io/nvidia-nemo/gym/nemo-gym-model
+  - name: quay.io/redhat-et/nemo-gym-model
     newName: quay.io/myorg/nemo-gym-model
     newTag: v1.0.0
 ```

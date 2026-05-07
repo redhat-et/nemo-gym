@@ -35,7 +35,7 @@ spec:
           type: RuntimeDefault
       containers:
         - name: agent
-          image: ghcr.io/nvidia-nemo/gym/nemo-gym-agent:latest
+          image: quay.io/redhat-et/nemo-gym-agent:latest
           imagePullPolicy: IfNotPresent
           workingDir: /opt/app-root/src
           env:

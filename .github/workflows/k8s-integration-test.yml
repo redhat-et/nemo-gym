@@ -40,7 +40,7 @@ jobs:
           context: .
           file: k8s/Dockerfile
           target: resources
-          tags: ghcr.io/nvidia-nemo/gym/nemo-gym-resources:latest
+          tags: quay.io/redhat-et/nemo-gym-resources:latest
           load: true
           cache-from: type=gha,scope=resources
           cache-to: type=gha,mode=max,scope=resources
@@ -51,7 +51,7 @@ jobs:
           context: .
           file: k8s/Dockerfile
           target: agent
-          tags: ghcr.io/nvidia-nemo/gym/nemo-gym-agent:latest
+          tags: quay.io/redhat-et/nemo-gym-agent:latest
           load: true
           cache-from: type=gha,scope=agent
           cache-to: type=gha,mode=max,scope=agent
@@ -62,7 +62,7 @@ jobs:
           context: .
           file: k8s/Dockerfile
           target: model
-          tags: ghcr.io/nvidia-nemo/gym/nemo-gym-model:latest
+          tags: quay.io/redhat-et/nemo-gym-model:latest
           load: true
           cache-from: type=gha,scope=model
           cache-to: type=gha,mode=max,scope=model
@@ -76,9 +76,9 @@ jobs:
       - name: Load images into kind
         run: |
           kind load docker-image \
-            ghcr.io/nvidia-nemo/gym/nemo-gym-resources:latest \
-            ghcr.io/nvidia-nemo/gym/nemo-gym-agent:latest \
-            ghcr.io/nvidia-nemo/gym/nemo-gym-model:latest \
+            quay.io/redhat-et/nemo-gym-resources:latest \
+            quay.io/redhat-et/nemo-gym-agent:latest \
+            quay.io/redhat-et/nemo-gym-model:latest \
             --name gym-ci
 
       - name: Install KubeRay operator
