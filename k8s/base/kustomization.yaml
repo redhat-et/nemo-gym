@@ -14,4 +14,4 @@ resources:
   - service-agent.yaml
   - service-model.yaml
   - networkpolicy.yaml
-  - route-dashboard.yaml
+  - ingress-dashboard.yaml

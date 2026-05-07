@@ -7,6 +7,7 @@ metadata:
     app.kubernetes.io/name: gym-model
     app.kubernetes.io/part-of: nemo-gym
 spec:
+  type: ClusterIP
   selector:
     app.kubernetes.io/name: gym-model
   ports:
