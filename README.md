@@ -265,7 +265,7 @@ The Dataset column links to publicly available datasets (e.g., on HuggingFace). 
 
 ## ☁️ Kubernetes Deployment
 
-NeMo Gym can be deployed on OpenShift with RHOAI-managed KubeRay for distributed benchmark execution. Each NeMo-Gym server type runs in its own pod, with the resources server embedded in the RayCluster for mTLS-authenticated distributed task execution.
+NeMo Gym can be deployed on Kubernetes or OpenShift with KubeRay for distributed benchmark execution. Each NeMo-Gym server type runs in its own pod, with the resources server embedded in the RayCluster for mTLS-authenticated distributed task execution.
 
 See **[`k8s/README.md`](k8s/README.md)** for setup instructions, architecture details, and how to add new benchmark overlays.
 

@@ -18,14 +18,15 @@ spec:
           app.kubernetes.io/part-of: nemo-gym
       spec:
         serviceAccountName: gym-sa
+        terminationGracePeriodSeconds: 60
         securityContext:
           runAsNonRoot: true
           seccompProfile:
             type: RuntimeDefault
         containers:
           - name: ray-head
-            image: quay.io/redhat-et/nemo-gym-resources:latest
-            imagePullPolicy: Always
+            image: ghcr.io/nvidia-nemo/gym/nemo-gym-resources:latest
+            imagePullPolicy: IfNotPresent
             ports:
               - containerPort: 6379
                 name: gcs
@@ -43,13 +44,13 @@ spec:
                 value: void
             resources:
               requests:
-                cpu: "2"
-                memory: 8Gi
+                cpu: "500m"
+                memory: 2Gi
               limits:
-                cpu: "2"
                 memory: 8Gi
             securityContext:
               allowPrivilegeEscalation: false
+              readOnlyRootFilesystem: true
               capabilities:
                 drop:
                   - ALL
@@ -57,11 +58,12 @@ spec:
               - mountPath: /tmp
                 name: ray-tmp
         volumes:
-          - emptyDir: {}
-            name: ray-tmp
+          - name: ray-tmp
+            emptyDir:
+              sizeLimit: 4Gi
   workerGroupSpecs:
     - groupName: gym-workers
-      replicas: 2
+      replicas: 1
       minReplicas: 1
       maxReplicas: 4
       rayStartParams:
@@ -72,14 +74,15 @@ spec:
             app.kubernetes.io/part-of: nemo-gym
         spec:
           serviceAccountName: gym-sa
+          terminationGracePeriodSeconds: 60
           securityContext:
             runAsNonRoot: true
             seccompProfile:
               type: RuntimeDefault
           containers:
             - name: ray-worker
-              image: quay.io/redhat-et/nemo-gym-resources:latest
-              imagePullPolicy: Always
+              image: ghcr.io/nvidia-nemo/gym/nemo-gym-resources:latest
+              imagePullPolicy: IfNotPresent
               env:
                 - name: RAY_TMPDIR
                   value: /tmp
@@ -87,13 +90,13 @@ spec:
                   value: void
               resources:
                 requests:
-                  cpu: "2"
-                  memory: 8Gi
+                  cpu: "500m"
+                  memory: 512Mi
                 limits:
-                  cpu: "2"
-                  memory: 8Gi
+                  memory: 2Gi
               securityContext:
                 allowPrivilegeEscalation: false
+                readOnlyRootFilesystem: true
                 capabilities:
                   drop:
                     - ALL
@@ -101,8 +104,9 @@ spec:
                 - mountPath: /tmp
                   name: ray-tmp
           volumes:
-            - emptyDir: {}
-              name: ray-tmp
+            - name: ray-tmp
+              emptyDir:
+                sizeLimit: 4Gi
     - groupName: gym-resources
       replicas: 1
       minReplicas: 1
@@ -117,14 +121,15 @@ spec:
             app.kubernetes.io/part-of: nemo-gym
         spec:
           serviceAccountName: gym-sa
+          terminationGracePeriodSeconds: 60
           securityContext:
             runAsNonRoot: true
             seccompProfile:
               type: RuntimeDefault
           containers:
             - name: ray-worker
-              image: quay.io/redhat-et/nemo-gym-resources:latest
-              imagePullPolicy: Always
+              image: ghcr.io/nvidia-nemo/gym/nemo-gym-resources:latest
+              imagePullPolicy: IfNotPresent
               lifecycle:
                 postStart:
                   exec:
@@ -172,11 +177,10 @@ spec:
                   protocol: TCP
               resources:
                 requests:
-                  cpu: "2"
-                  memory: 8Gi
+                  cpu: "500m"
+                  memory: 512Mi
                 limits:
-                  cpu: "2"
-                  memory: 8Gi
+                  memory: 2Gi
               startupProbe:
                 httpGet:
                   path: /docs
@@ -198,6 +202,7 @@ spec:
                 failureThreshold: 5
               securityContext:
                 allowPrivilegeEscalation: false
+                readOnlyRootFilesystem: true
                 capabilities:
                   drop:
                     - ALL
@@ -205,5 +210,6 @@ spec:
                 - mountPath: /tmp
                   name: ray-tmp
           volumes:
-            - emptyDir: {}
-              name: ray-tmp
+            - name: ray-tmp
+              emptyDir:
+                sizeLimit: 4Gi

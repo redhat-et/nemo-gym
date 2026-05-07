@@ -10,6 +10,12 @@ metadata:
     app.kubernetes.io/managed-by: kustomize
 spec:
   replicas: 1
+  minReadySeconds: 10
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 1
+      maxUnavailable: 0
   selector:
     matchLabels:
       app.kubernetes.io/name: gym-model
@@ -21,14 +27,16 @@ spec:
         app.kubernetes.io/part-of: nemo-gym
     spec:
       serviceAccountName: gym-sa
+      automountServiceAccountToken: false
+      terminationGracePeriodSeconds: 30
       securityContext:
         runAsNonRoot: true
         seccompProfile:
           type: RuntimeDefault
       containers:
         - name: model
-          image: quay.io/redhat-et/nemo-gym-model:latest
-          imagePullPolicy: Always
+          image: ghcr.io/nvidia-nemo/gym/nemo-gym-model:latest
+          imagePullPolicy: IfNotPresent
           workingDir: /opt/app-root/src
           env:
             - name: NEMO_GYM_CONFIG_DICT
@@ -59,11 +67,10 @@ spec:
               protocol: TCP
           resources:
             requests:
-              cpu: "500m"
-              memory: 2Gi
+              cpu: "250m"
+              memory: 512Mi
             limits:
-              cpu: "1"
-              memory: 2Gi
+              memory: 1Gi
           startupProbe:
             httpGet:
               path: /docs
@@ -83,8 +90,13 @@ spec:
               port: 8080
             periodSeconds: 30
             failureThreshold: 5
+          lifecycle:
+            preStop:
+              exec:
+                command: ["/bin/sleep", "5"]
           securityContext:
             allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
             capabilities:
               drop:
                 - ALL
@@ -93,4 +105,5 @@ spec:
               mountPath: /tmp
       volumes:
         - name: tmp
-          emptyDir: {}
+          emptyDir:
+            sizeLimit: 1Gi

@@ -1,6 +1,6 @@
-# NeMo-Gym on OpenShift with KubeRay
+# NeMo-Gym on Kubernetes
 
-Deploy NeMo-Gym benchmarks on OpenShift using RHOAI-managed KubeRay for distributed Ray task execution. The base manifests are benchmark-agnostic — each benchmark gets its own Kustomize overlay (see `overlays/code-gen/` for an example).
+Deploy NeMo-Gym benchmarks on any Kubernetes cluster using KubeRay for distributed Ray task execution. The base manifests are platform-agnostic — each benchmark gets its own Kustomize overlay, and optional platform overlays (e.g. OpenShift) compose on top.
 
 ## Architecture
 
@@ -10,7 +10,7 @@ Deploy NeMo-Gym benchmarks on OpenShift using RHOAI-managed KubeRay for distribu
 │  RayCluster: gym-ray                                              │
 │  ┌─────────────────────────────────────────────────────────────┐  │
 │  │  Head Pod (coordination, dashboard on :8265)                │  │
-│  │  Worker Pods (2x, execute @ray.remote tasks)                │  │
+│  │  Worker Pods (execute @ray.remote tasks)                    │  │
 │  │  Resources Worker Pod ← runs benchmark server on :9080      │  │
 │  └─────────────────────────────────────────────────────────────┘  │
 │                                                                   │
@@ -18,7 +18,7 @@ Deploy NeMo-Gym benchmarks on OpenShift using RHOAI-managed KubeRay for distribu
 │  Deployment: gym-model (vllm_model proxy on :8080)                │
 │                                                                   │
 │  Services: gym-agent-svc, gym-model-svc, gym-resources-svc        │
-│  Route: gym-ray-dashboard (Ray dashboard, edge TLS)               │
+│  Ingress: gym-ray-dashboard (Ray dashboard, optional)             │
 └───────────────────────────────────────────────────────────────────┘
         │
         │ HTTPS
@@ -32,270 +32,187 @@ Deploy NeMo-Gym benchmarks on OpenShift using RHOAI-managed KubeRay for distribu
 
 ```
 k8s/
-├── Dockerfile                        # Multi-stage: resources, agent, model targets
-├── entrypoint.sh                     # OpenShift arbitrary UID handler
+├── Dockerfile                              # Multi-stage: resources, agent, model targets
+├── entrypoint.sh                           # Arbitrary UID handler (harmless on standard K8s)
 ├── README.md
-├── base/                             # Generic manifests (no benchmark-specific config)
+├── base/                                   # Works on ANY Kubernetes cluster with KubeRay
 │   ├── kustomization.yaml
-│   ├── namespace.yaml                # Namespace: gym
-│   ├── serviceaccount.yaml           # ServiceAccount: gym-sa
-│   ├── configmap.yaml                # Base Hydra config (agent + model only)
-│   ├── raycluster.yaml               # Ray head, workers, resources worker group
-│   ├── deployment-agent.yaml         # simple_agent (skips Ray)
-│   ├── deployment-model.yaml         # vllm_model proxy (skips Ray)
-│   ├── service-*.yaml                # ClusterIP services
-│   ├── networkpolicy.yaml            # Internal + ingress + monitoring + Ray workers
-│   └── route-dashboard.yaml          # Ray dashboard (edge TLS)
+│   ├── namespace.yaml
+│   ├── serviceaccount.yaml
+│   ├── configmap.yaml                      # Base Hydra config (agent + model)
+│   ├── raycluster.yaml                     # Ray head, workers, resources worker group
+│   ├── deployment-agent.yaml               # simple_agent (skips Ray)
+│   ├── deployment-model.yaml               # vllm_model proxy (skips Ray)
+│   ├── service-*.yaml                      # ClusterIP services
+│   ├── networkpolicy.yaml                  # Internal pod-to-pod traffic
+│   └── ingress-dashboard.yaml              # K8s Ingress for Ray dashboard (optional)
 └── overlays/
-    └── code-gen/                     # code_gen benchmark overlay (use as template)
-        ├── kustomization.yaml        # Patches ConfigMap + RayCluster for code_gen
-        ├── configmap-patch.yaml      # code_gen resources server Hydra config
-        └── secret.yaml               # LLM credentials (gitignored, template committed)
+    ├── openshift/                          # Platform: OpenShift (Kustomize Component)
+    ├── code-gen/                           # Benchmark: code generation
+    ├── example-single-tool-call/           # Benchmark: minimal example
+    ├── code-gen-openshift/                 # Composition: code-gen + OpenShift
+    └── example-single-tool-call-openshift/ # Composition: example + OpenShift
 ```
 
 ## Prerequisites
 
-### OpenShift cluster requirements
-
 | Component | Requirement | How to verify |
 |-----------|-------------|---------------|
-| OpenShift | 4.14+ | `oc version` |
-| RHOAI (Red Hat OpenShift AI) | 2.x+ with KubeRay operator enabled | `oc get csv -n redhat-ods-applications \| grep rhods` |
-| KubeRay operator | Managed by RHOAI — must be running | `oc get deployment -n redhat-ods-applications -l app.kubernetes.io/name=kuberay` |
-| Worker nodes | At least 1 CPU worker with 32Gi+ RAM (for Ray head + workers + resources server) | `oc get nodes -l node-role.kubernetes.io/worker` |
-| Default StorageClass | Any (only emptyDir volumes used, but cluster must be functional) | `oc get sc` |
-| Namespace creation | User must be able to create projects | `oc auth can-i create projects` |
-| Image pull access | Cluster nodes must reach `quay.io` (or use a pull secret for private registries) | `oc debug node/<node> -- curl -s https://quay.io/v2/` |
+| Kubernetes | 1.27+ | `kubectl version` |
+| KubeRay operator | Installed via Helm | `kubectl get crd rayclusters.ray.io` |
+| kustomize | 4.x+ | `kustomize version` |
 
-RHOAI's KubeRay operator automatically injects mTLS certificates and OAuth proxies into RayCluster pods. The deployment manifests are designed to work with this — no manual TLS configuration is needed.
+**Install KubeRay:**
 
-### Workstation requirements
-
-- `oc` CLI authenticated to the cluster (`oc login`)
-- `podman` (or `docker`) for building linux/amd64 images
-- An OpenAI-compatible LLM endpoint accessible from the cluster (vLLM, RHOAI Model-as-a-Service, OpenAI, etc.) — the cluster pods must be able to reach this endpoint over HTTPS
-
-## Deployment Defaults
-
-The manifests deploy into a namespace called **`gym`** by default. All resource names are prefixed with `gym-` (e.g., `gym-ray`, `gym-agent-svc`). These defaults work out of the box — you only need to change them if you want to run multiple instances or follow a naming convention.
-
-### Changing the namespace
-
-Edit one line in `k8s/base/kustomization.yaml`:
-
-```yaml
-namespace: my-namespace    # change from "gym" to whatever you want
+```bash
+helm repo add kuberay https://ray-project.github.io/kuberay-helm/
+helm install kuberay-operator kuberay/kuberay-operator \
+  --version 1.3.0 --namespace kuberay-system --create-namespace
 ```
-
-Kustomize applies this to all resources at render time. Service discovery uses short names (e.g., `gym-agent-svc`) that resolve within whichever namespace you deploy to — no FQDN edits needed.
-
-If the namespace doesn't exist yet, either create it first (`oc new-project my-namespace`) or let the included `namespace.yaml` create it. Note that `namespace.yaml` creates a namespace called `gym` — if you change the Kustomize namespace, also update `namespace.yaml` or remove it and create the namespace yourself.
-
-### Customizing resource names
-
-The `gym-` prefix on all resource names (services, deployments, RayCluster) is hardcoded in the YAML files. If you need different names, edit the base manifests directly. Be sure to update all cross-references (Service selectors, env vars, ConfigMap refs, etc.).
 
 ## Quick Start
 
-### 1. Build and push images
+### 1. Build and push images (or use GHCR)
 
-From the Gym repo root:
+Pre-built images are available from GitHub Container Registry:
 
-```bash
-podman build --platform linux/amd64 -f k8s/Dockerfile --target resources -t quay.io/redhat-et/nemo-gym-resources:latest .
-podman build --platform linux/amd64 -f k8s/Dockerfile --target agent -t quay.io/redhat-et/nemo-gym-agent:latest .
-podman build --platform linux/amd64 -f k8s/Dockerfile --target model -t quay.io/redhat-et/nemo-gym-model:latest .
-
-podman push quay.io/redhat-et/nemo-gym-resources:latest
-podman push quay.io/redhat-et/nemo-gym-agent:latest
-podman push quay.io/redhat-et/nemo-gym-model:latest
+```
+ghcr.io/nvidia-nemo/gym/nemo-gym-resources:latest
+ghcr.io/nvidia-nemo/gym/nemo-gym-agent:latest
+ghcr.io/nvidia-nemo/gym/nemo-gym-model:latest
 ```
 
-Ensure the image repos are set to **public** on quay.io, or add a pull secret to the `gym` namespace.
-
-### 2. Configure the LLM endpoint
-
-Before deploying, create the secret file with your LLM credentials. The overlay expects `k8s/overlays/code-gen/secret.yaml` (gitignored — it won't exist on a fresh clone):
+Or build from source:
 
 ```bash
-cat > k8s/overlays/code-gen/secret.yaml <<'EOF'
-apiVersion: v1
-kind: Secret
-metadata:
-  name: gym-secrets
-  namespace: gym
-  labels:
-    app.kubernetes.io/part-of: nemo-gym
-type: Opaque
-stringData:
-  POLICY_BASE_URL: "https://your-llm-endpoint/v1"
-  POLICY_API_KEY: "your-api-key"
-  POLICY_MODEL_NAME: "your-model-name"
-EOF
+docker build -f k8s/Dockerfile --target resources -t ghcr.io/nvidia-nemo/gym/nemo-gym-resources:latest .
+docker build -f k8s/Dockerfile --target agent -t ghcr.io/nvidia-nemo/gym/nemo-gym-agent:latest .
+docker build -f k8s/Dockerfile --target model -t ghcr.io/nvidia-nemo/gym/nemo-gym-model:latest .
+```
+
+### 2. Configure LLM credentials
+
+```bash
+cp k8s/overlays/code-gen/secret.yaml.example k8s/overlays/code-gen/secret.yaml
+# Edit secret.yaml with your LLM endpoint details
 ```
 
 | Field | What to set | Example |
 |-------|-------------|---------|
 | `POLICY_BASE_URL` | OpenAI-compatible API base URL (must end with `/v1`) | `https://my-vllm.example.com/v1` |
-| `POLICY_API_KEY` | API key or bearer token. Use any value if the endpoint has no auth. | `sk-abc123` |
-| `POLICY_MODEL_NAME` | Model identifier as the endpoint expects it in the `model` field | `meta-llama/Llama-3.1-8B-Instruct` |
+| `POLICY_API_KEY` | API key or bearer token | `sk-abc123` |
+| `POLICY_MODEL_NAME` | Model identifier | `meta-llama/Llama-3.1-8B-Instruct` |
 
 ### 3. Deploy
 
 ```bash
-oc apply -k k8s/overlays/code-gen/
-```
-
-Pods will pull images, start Ray, and connect to your LLM endpoint. If you need to update credentials later:
-
-```bash
-# Edit k8s/overlays/code-gen/secret.yaml, then:
-oc apply -k k8s/overlays/code-gen/
-oc rollout restart deployment/gym-agent deployment/gym-model -n gym
+kustomize build k8s/overlays/code-gen | kubectl apply -f -
 ```
 
 ### 4. Verify
 
-Wait for all pods to reach Running/Ready:
-
 ```bash
-oc get pods -n gym -w
+kubectl get pods -n gym -w
 ```
 
 Expected state:
 
 | Pod | Ready | Description |
 |-----|-------|-------------|
-| `gym-ray-head-*` | 2/2 | Ray head + OAuth proxy |
-| `gym-ray-gym-workers-worker-*` (x2) | 1/1 | Ray code execution workers |
-| `gym-ray-gym-resources-worker-*` | 1/1 | Resources server (code_gen) + Ray node |
-| `gym-agent-*` | 1/1 | Agent server (simple_agent) |
-| `gym-model-*` | 1/1 | Model proxy (vllm_model) |
-
-Check the resources server connected to Ray:
-
-```bash
-oc exec $(oc get pod -n gym -l ray.io/group=gym-resources -o name) -n gym -- tail -5 /tmp/nemo-gym-server.log
-```
-
-You should see `Connected to Ray cluster` and `Uvicorn running on http://0.0.0.0:9080`.
+| `gym-ray-head-*` | 1/1 | Ray head node |
+| `gym-ray-gym-workers-worker-*` | 1/1 | Ray code execution worker |
+| `gym-ray-gym-resources-worker-*` | 1/1 | Resources server + Ray node |
+| `gym-agent-*` | 1/1 | Agent server |
+| `gym-model-*` | 1/1 | Model proxy |
 
 ### 5. Smoke test
 
 ```bash
-# Port-forward the agent
-oc port-forward -n gym svc/gym-agent-svc 8080:8080 &
-
-# Send a test request
-curl -s -X POST http://localhost:8080/run \
-  -H "Content-Type: application/json" \
-  -d @<(head -1 resources_servers/code_gen/data/example.jsonl)
-
-# Clean up
+kubectl port-forward -n gym svc/gym-agent-svc 8080:8080 &
+curl -s http://localhost:8080/docs | head -5
 kill %1
 ```
 
-A successful response contains a `reward` field (0.0 or 1.0) and the model's generated code.
-
-### 6. Collect rollouts
-
-For benchmarking, use `ng_collect_rollouts` targeting the deployed agent via port-forward:
+### 6. Ray dashboard
 
 ```bash
-oc port-forward -n gym svc/gym-agent-svc 8080:8080 &
-
-ng_collect_rollouts \
-  +agent_name=simple_agent_instance \
-  +input_jsonl_fpath=resources_servers/code_gen/data/example.jsonl \
-  +output_jsonl_fpath=results/rollouts.jsonl \
-  +num_repeats=5 \
-  "+responses_create_params={max_output_tokens: 16384, temperature: 1.0}" \
-  "+agent_server_url=http://localhost:8080"
+kubectl port-forward -n gym svc/gym-ray-head-svc 8265:8265
 ```
 
-Profile results:
+The base includes a Kubernetes Ingress for the Ray dashboard. If your cluster has an Ingress controller, it will be picked up automatically. Otherwise, use port-forwarding above.
+
+## Available Overlays
+
+Benchmark overlays are platform-agnostic. Platform overlays add cluster-specific resources. Composition overlays combine both.
+
+| Overlay | Type | Description |
+|---------|------|-------------|
+| `code-gen` | Benchmark | Code generation benchmark (`resources_servers/code_gen`) |
+| `example-single-tool-call` | Benchmark | Minimal single tool call example |
+| `openshift` | Platform | [Kustomize Component](https://kubectl.docs.kubernetes.io/guides/config_management/components/) — adds OpenShift Route, OCP NetworkPolicies, removes Ingress |
+| `code-gen-openshift` | Composition | `code-gen` + `openshift` |
+| `example-single-tool-call-openshift` | Composition | `example-single-tool-call` + `openshift` |
+
+Deploy a composition overlay the same way:
 
 ```bash
-ng_reward_profile \
-  +input_jsonl_fpath=resources_servers/code_gen/data/example.jsonl \
-  +rollouts_jsonl_fpath=results/rollouts.jsonl \
-  +output_jsonl_fpath=results/profiled.jsonl \
-  +pass_threshold=1.0
+kustomize build k8s/overlays/code-gen-openshift | kubectl apply -f -
 ```
 
-## Customization
+## Using a Different Image Registry
 
-### Using a different LLM
+Override the default GHCR images in any overlay's `kustomization.yaml`:
 
-Update the Secret and restart the model deployment:
-
-```bash
-oc set data secret/gym-secrets -n gym \
-  --from-literal=POLICY_BASE_URL="https://new-endpoint/v1" \
-  --from-literal=POLICY_API_KEY="new-key" \
-  --from-literal=POLICY_MODEL_NAME="new-model"
-
-oc rollout restart deployment/gym-model -n gym
+```yaml
+images:
+  - name: ghcr.io/nvidia-nemo/gym/nemo-gym-resources
+    newName: quay.io/myorg/nemo-gym-resources
+    newTag: v1.0.0
+  - name: ghcr.io/nvidia-nemo/gym/nemo-gym-agent
+    newName: quay.io/myorg/nemo-gym-agent
+    newTag: v1.0.0
+  - name: ghcr.io/nvidia-nemo/gym/nemo-gym-model
+    newName: quay.io/myorg/nemo-gym-model
+    newTag: v1.0.0
 ```
 
-### Adding a new benchmark
+## Adding a New Benchmark
 
-The base manifests are benchmark-agnostic. Each benchmark gets its own Kustomize overlay with three files. Use `overlays/code-gen/` as a starting point:
+Copy an existing overlay as a starting point:
 
 ```bash
 cp -r k8s/overlays/code-gen k8s/overlays/my-benchmark
 ```
 
-#### File 1: `secret.yaml` — LLM credentials
+Three files to customize:
 
-Provides the connection details for the OpenAI-compatible LLM that the model proxy calls.
+### `secret.yaml` — LLM credentials
 
-```yaml
-stringData:
-  POLICY_BASE_URL: "https://your-llm-endpoint/v1"   # Must end with /v1
-  POLICY_API_KEY: "your-api-key"                     # API key or token
-  POLICY_MODEL_NAME: "your-model-name"               # Model ID as the endpoint expects it
-```
+Copy from `secret.yaml.example` and fill in your endpoint details.
 
-| Field | What it is | Example |
-|-------|-----------|---------|
-| `POLICY_BASE_URL` | Base URL of an OpenAI-compatible API. Must include `/v1`. The model proxy appends `/chat/completions`. | `https://my-vllm.example.com/v1` |
-| `POLICY_API_KEY` | Bearer token for the LLM API. Set to any value (e.g., `unused`) if the endpoint doesn't require auth. | `sk-abc123...` |
-| `POLICY_MODEL_NAME` | Model identifier passed in the `model` field of API requests. Must match what the serving endpoint expects. | `meta-llama/Llama-3.1-8B-Instruct` |
+### `configmap-patch.yaml` — Benchmark server config
 
-This file is gitignored. The checked-in template has placeholder values — replace them before deploying.
-
-#### File 2: `configmap-patch.yaml` — Benchmark server config
-
-Defines the NeMo-Gym Hydra config for your resources server. This replaces the base ConfigMap entirely.
-
-The key section to change is `resources_instance` — everything else (agent, model, Ray settings) stays the same:
+Update `resources_instance` with your server's config:
 
 ```yaml
-    resources_instance:                    # Keep this name — the agent references it
+    resources_instance:
       resources_servers:
-        my_server:                         # ← Your server's directory name under resources_servers/
-          entrypoint: app.py               # Usually app.py
-          host: "${oc.env:RESOURCES_HOST}" # Don't change — resolved at runtime
-          port: 9080                       # Don't change — must avoid Ray metrics on 8080
-          domain: coding                   # Domain hint (coding, math, etc.)
-          # Add any server-specific config fields below:
+        my_server:
+          entrypoint: app.py
+          host: "${oc.env:RESOURCES_HOST}"
+          port: 9080
+          domain: coding
+          # Server-specific fields:
           num_processes: 4
           timeout_secs: 30
 ```
 
-The fields under your server name are passed directly to your server's Pydantic config model. Check your server's `app.py` for available config fields.
+### `kustomization.yaml` — RayCluster env patches
 
-#### File 3: `kustomization.yaml` — Wiring it together
-
-Two JSON patches tell the RayCluster which server to start and which config section to load:
+Update the JSON patches to point to your server:
 
 ```yaml
 patches:
-  - path: configmap-patch.yaml
-    target:
-      kind: ConfigMap
-      name: gym-config
   - patch: |-
       - op: replace
         path: /spec/workerGroupSpecs/1/template/spec/containers/0/env/2/value
@@ -308,111 +225,82 @@ patches:
       name: gym-ray
 ```
 
-| Patch | What it sets | Change to |
-|-------|-------------|-----------|
-| `env/2/value` | `NEMO_GYM_SERVER_ENTRYPOINT` — the Python command to start your server | `python resources_servers/<your_server>/app.py` |
-| `env/4/value` | `NEMO_GYM_CONFIG_PATH` — which top-level config key your server reads | `resources_instance` (keep as-is unless you renamed it) |
+**Env index warning:** The RayCluster env vars are patched by array index. `env[2]` is `NEMO_GYM_SERVER_ENTRYPOINT` and `env[4]` is `NEMO_GYM_CONFIG_PATH`. Do not reorder the env vars in `base/raycluster.yaml`.
 
-#### Deploy and test
+### Platform support for new benchmarks
+
+Create a composition overlay that layers the platform component onto your benchmark:
 
 ```bash
-# Deploy
-oc apply -k k8s/overlays/my-benchmark/
+mkdir k8s/overlays/my-benchmark-openshift
+cat > k8s/overlays/my-benchmark-openshift/kustomization.yaml <<'EOF'
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
 
-# Apply your real secret (the template has placeholders)
-oc create secret generic gym-secrets -n gym \
-  --from-literal=POLICY_BASE_URL="https://actual-endpoint/v1" \
-  --from-literal=POLICY_API_KEY="actual-key" \
-  --from-literal=POLICY_MODEL_NAME="actual-model" \
-  --dry-run=client -o yaml | oc apply -f -
+resources:
+  - ../my-benchmark
 
-# Restart pods to pick up the secret
-oc rollout restart deployment/gym-agent deployment/gym-model -n gym
-
-# Wait for all pods
-oc get pods -n gym -w
-
-# Smoke test (use your benchmark's example data)
-oc port-forward -n gym svc/gym-agent-svc 8080:8080 &
-curl -s -X POST http://localhost:8080/run \
-  -H "Content-Type: application/json" \
-  -d @<(head -1 resources_servers/my_server/data/example.jsonl)
-kill %1
+components:
+  - ../openshift
+EOF
 ```
 
-### Scaling Ray workers
+## Scaling Ray Workers
 
-Edit `k8s/base/raycluster.yaml` and adjust the `gym-workers` group:
+Edit `k8s/base/raycluster.yaml`:
 
 ```yaml
 workerGroupSpecs:
   - groupName: gym-workers
-    replicas: 4        # increase for more parallelism
+    replicas: 4
     minReplicas: 2
     maxReplicas: 8
 ```
 
-Then reapply: `oc apply -k k8s/overlays/code-gen/`
+Then reapply: `kustomize build k8s/overlays/code-gen | kubectl apply -f -`
 
-### Adjusting memory
-
-- **Agent/model pods**: 2Gi each (no Ray runtime). Adjust in `deployment-agent.yaml` / `deployment-model.yaml`.
-- **Resources worker**: 8Gi (includes Ray node). Adjust in `raycluster.yaml` under `gym-resources` group.
-- **Ray execution workers**: 8Gi each. Adjust in `raycluster.yaml` under `gym-workers` group.
-
-## How It Works
-
-### RHOAI mTLS integration
-
-RHOAI's KubeRay operator injects mTLS certificates into all RayCluster pods. The resources server runs inside a RayCluster worker group pod so it receives valid TLS certs automatically. A `postStart` lifecycle hook starts the NeMo-Gym server after Ray joins the cluster. The agent and model servers run as standard Deployments and skip Ray initialization entirely (`NEMO_GYM_SKIP_RAY_INIT=1`).
-
-### Port layout
+## Port Layout
 
 | Server | Port | Notes |
 |--------|------|-------|
 | Agent (simple_agent) | 8080 | Standard HTTP |
 | Model (vllm_model) | 8080 | Standard HTTP |
 | Resources (benchmark) | 9080 | Non-default to avoid conflict with Ray metrics on 8080 |
-| Ray GCS | 6379 | Internal, mTLS |
-| Ray Dashboard | 8265 | Exposed via Route |
-
-### NetworkPolicies
-
-RHOAI creates NetworkPolicies restricting Ray cluster traffic. An additional `allow-gym-to-ray-workers` policy permits the agent and model pods to reach the resources server on the Ray worker group.
+| Ray GCS | 6379 | Internal |
+| Ray Dashboard | 8265 | Access via `kubectl port-forward` or Ingress |
 
 ## Teardown
 
 ```bash
-oc delete -k k8s/overlays/code-gen/
-oc delete project gym
+kustomize build k8s/overlays/code-gen | kubectl delete -f -
 ```
 
 ## Troubleshooting
 
-**General debugging — check recent events:**
+**Check recent events:**
 ```bash
-oc get events -n gym --sort-by='.lastTimestamp' | tail -20
+kubectl get events -n gym --sort-by='.lastTimestamp' | tail -20
 ```
 
 **Resources pod not reaching Ready:**
 ```bash
-oc exec $(oc get pod -n gym -l ray.io/group=gym-resources -o name) -n gym -- cat /tmp/nemo-gym-server.log
+kubectl exec $(kubectl get pod -n gym -l ray.io/group=gym-resources -o name) -n gym -- cat /tmp/nemo-gym-server.log
 ```
 
-**Agent returns 405 or connection errors:**
-Check NetworkPolicies allow traffic from agent to resources pods:
+**Agent returns connection errors:**
+Check NetworkPolicies allow traffic between pods:
 ```bash
-oc get networkpolicy -n gym
+kubectl get networkpolicy -n gym
 ```
 
 **Model returns connection errors:**
-Verify the LLM endpoint is reachable from within the cluster:
+Verify the LLM endpoint is reachable from inside the cluster:
 ```bash
-oc exec $(oc get pod -n gym -l app.kubernetes.io/name=gym-model -o name) -n gym -- \
+kubectl exec $(kubectl get pod -n gym -l app.kubernetes.io/name=gym-model -o name) -n gym -- \
   curl -s "$POLICY_BASE_URL/models" -H "Authorization: Bearer $POLICY_API_KEY"
 ```
 
 **Ray dashboard:**
 ```bash
-oc get route gym-ray-dashboard -n gym -o jsonpath='{.spec.host}'
+kubectl port-forward -n gym svc/gym-ray-head-svc 8265:8265
 ```
