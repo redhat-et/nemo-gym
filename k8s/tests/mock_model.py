@@ -23,6 +23,7 @@ the mock decoupled from internal schema evolution.
 import uvicorn
 from fastapi import FastAPI, Request
 
+
 app = FastAPI()
 
 CANNED_RESPONSE = {
