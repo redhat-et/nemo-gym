@@ -1,5 +1,8 @@
 name: K8s Integration Test (kind)
 
+permissions:
+  contents: read
+
 on:
   push:
     branches: [main]
@@ -87,6 +90,12 @@ jobs:
             --create-namespace \
             --wait \
             --timeout 120s
+
+      - name: Create test secrets from examples
+        run: |
+          for f in k8s/overlays/*/secret.yaml.example; do
+            cp "$f" "${f%.example}"
+          done
 
       - name: Deploy NeMo-Gym stack with mock model
         run: kubectl apply -k k8s/tests/
